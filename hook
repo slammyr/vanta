@@ -2804,17 +2804,7 @@ function library:playerlist(options)
 		end
 	})
 	
-	local priority_list_dropdown = self:dropdown({
-		name = "Saved Priorities",
-		flag = "saved_priorities_dropdown",
-		items = {},
-		default = "Select a player",
-		callback = function(value)
-			if value and value ~= "Select a player" then
-				library.selected_priority_player = value
-			end
-		end
-	})
+
 	
 	self:button({
 		name = "Delete Priority",
@@ -2867,7 +2857,17 @@ function library:playerlist(options)
 	})
 	
 	local button_holder3 = self:button_holder({})
-	
+	local priority_list_dropdown = self:dropdown({
+		name = "Saved Priorities",
+		flag = "saved_priorities_dropdown",
+		items = {},
+		default = "Select a player",
+		callback = function(value)
+			if value and value ~= "Select a player" then
+				library.selected_priority_player = value
+			end
+		end
+	})
 	local friendly_dropdown = self:dropdown({
 		name = "Saved Friendlies",
 		flag = "friendly_dropdown",
