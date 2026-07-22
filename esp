@@ -66,6 +66,10 @@ ESP.FriendlySettings = {
     ChamsOutline = false,
     Tool = false,
     ToolColor = Color3.fromRGB(80, 255, 120),
+    VisibleOnly = false,
+    VisibleCheck = false,
+    VisibleColor = Color3.fromRGB(0, 255, 0),
+    OccludedColor = Color3.fromRGB(255, 0, 0),
 }
 
 ESP.EnemySettings = {
@@ -91,6 +95,10 @@ ESP.EnemySettings = {
     ChamsOutline = false,
     Tool = false,
     ToolColor = Color3.fromRGB(255, 80, 80),
+    VisibleOnly = false,
+    VisibleCheck = false,
+    VisibleColor = Color3.fromRGB(0, 255, 0),
+    OccludedColor = Color3.fromRGB(255, 0, 0),
 }
 
 ESP.PrioritySettings = {
@@ -116,6 +124,10 @@ ESP.PrioritySettings = {
     ChamsOutline = false,
     Tool = false,
     ToolColor = Color3.fromRGB(180, 80, 255),
+    VisibleOnly = false,
+    VisibleCheck = false,
+    VisibleColor = Color3.fromRGB(0, 255, 0),
+    OccludedColor = Color3.fromRGB(255, 0, 0),
 }
 
 ESP.SelfSettings = {
@@ -143,6 +155,10 @@ ESP.SelfSettings = {
     ToolColor = Color3.fromRGB(0, 200, 255),
     Font = "Plex",
     FlagsFont = "Plex",
+    VisibleOnly = false,
+    VisibleCheck = false,
+    VisibleColor = Color3.fromRGB(0, 255, 0),
+    OccludedColor = Color3.fromRGB(255, 0, 0),
 }
 
 ESP.Objects = {}
@@ -185,15 +201,15 @@ local function GetSettingsForPlayer(player, isSelf)
     return ESP.Settings
 end
 
-local function GetESPColor(player, defaultColor, isVisible, isSelf)
+local function GetESPColor(settings, defaultColor, isVisible, isSelf)
     if isSelf then
         return defaultColor
     end
-    if ESP.Settings.VisibleCheck then
+    if settings.VisibleCheck then
         if isVisible then
-            return ESP.Settings.VisibleColor
+            return settings.VisibleColor
         else
-            return ESP.Settings.OccludedColor
+            return settings.OccludedColor
         end
     end
     return defaultColor
@@ -482,12 +498,17 @@ local function DrawPlayerESP(player, isSelf)
             HideESPObject(obj)
             return
         end
-        local isVisible = IsVisible(character, hrp)
-        if ESP.Settings.VisibleOnly and not isVisible then
+    end
+    
+    local isVisible = IsVisible(character, hrp)
+    
+    if not isSelf then
+        if settings.VisibleOnly and not isVisible then
             HideESPObject(obj)
             return
         end
     end
+    
     local useDynamic = isSelf and settings.BoxType == "Dynamic" or settings.BoxType == "Dynamic"
     local bounds = GetBoundingBox(character, useDynamic)
     if not bounds or bounds.Width < 1 or bounds.Height < 1 then
@@ -511,7 +532,7 @@ local function DrawPlayerESP(player, isSelf)
         if nameY > -50 then
             obj.Name.Text = settings.NameType == "Username" and player.Name or player.DisplayName
             obj.Name.Position = Vector2.new(clampedX + clampedWidth / 2, nameY)
-            obj.Name.Color = settings.NameColor
+            obj.Name.Color = GetESPColor(settings, settings.NameColor, isVisible, isSelf)
             obj.Name.Font = GetFont(settings.Font or settings.FlagsFont or "Plex")
             obj.Name.Visible = true
         else
@@ -531,7 +552,7 @@ local function DrawPlayerESP(player, isSelf)
         obj.BoxOutline.Visible = true
         obj.Box.Position = pos
         obj.Box.Size = size
-        obj.Box.Color = settings.BoxColor
+        obj.Box.Color = GetESPColor(settings, settings.BoxColor, isVisible, isSelf)
         obj.Box.Transparency = 1
         obj.Box.Thickness = 1
         obj.Box.Visible = true
@@ -738,7 +759,7 @@ local function DrawPlayerESP(player, isSelf)
                     obj.SkeletonOutlines[boneIndex].Visible = true
                     obj.SkeletonLines[boneIndex].From = from
                     obj.SkeletonLines[boneIndex].To = to
-                    obj.SkeletonLines[boneIndex].Color = settings.SkeletonColor
+                    obj.SkeletonLines[boneIndex].Color = GetESPColor(settings, settings.SkeletonColor, isVisible, isSelf)
                     obj.SkeletonLines[boneIndex].Visible = true
                 end
             end
@@ -762,7 +783,7 @@ local function DrawPlayerESP(player, isSelf)
             highlight.Parent = character
             obj.Highlight = highlight
         end
-        obj.Highlight.FillColor = settings.ChamsColor
+        obj.Highlight.FillColor = GetESPColor(settings, settings.ChamsColor, isVisible, isSelf)
         obj.Highlight.OutlineColor = settings.ChamsOutlineColor
         obj.Highlight.OutlineTransparency = settings.ChamsOutline and 0 or 1
         obj.Highlight.Enabled = true
@@ -778,7 +799,7 @@ local function DrawPlayerESP(player, isSelf)
         local distY = bottomOffset
         if distY > -50 and distY < viewport.Y + 50 then
             obj.Distance.Position = Vector2.new(bounds.X + bounds.Width / 2, distY)
-            obj.Distance.Color = settings.DistanceColor
+            obj.Distance.Color = GetESPColor(settings, settings.DistanceColor, isVisible, isSelf)
             obj.Distance.Font = GetFont(settings.FlagsFont or "Plex")
             obj.Distance.Visible = true
             bottomOffset = bottomOffset + 14
@@ -795,7 +816,7 @@ local function DrawPlayerESP(player, isSelf)
         local toolY = bottomOffset
         if toolY > -50 and toolY < viewport.Y + 50 then
             obj.Tool.Position = Vector2.new(bounds.X + bounds.Width / 2, toolY)
-            obj.Tool.Color = settings.ToolColor
+            obj.Tool.Color = GetESPColor(settings, settings.ToolColor, isVisible, isSelf)
             obj.Tool.Font = GetFont(settings.FlagsFont or "Plex")
             obj.Tool.Visible = true
         else
@@ -969,6 +990,10 @@ function ESP:SyncFromFlags(flags)
     self.FriendlySettings.ChamsOutline = getFlagValue(flags["esp_friendly_chams_outline"]) or false
     self.FriendlySettings.Tool = getFlagValue(flags["esp_friendly_tool"]) or false
     self.FriendlySettings.ToolColor = getColorValue(flags["esp_friendly_tool_color"]) or self.FriendlySettings.ToolColor
+    self.FriendlySettings.VisibleOnly = getFlagValue(flags["esp_friendly_visible_only"]) or false
+    self.FriendlySettings.VisibleCheck = getFlagValue(flags["esp_friendly_visible_check"]) or false
+    self.FriendlySettings.VisibleColor = getColorValue(flags["esp_friendly_visible_color"]) or self.FriendlySettings.VisibleColor
+    self.FriendlySettings.OccludedColor = getColorValue(flags["esp_friendly_occluded_color"]) or self.FriendlySettings.OccludedColor
     
     self.EnemySettings.Enabled = getFlagValue(flags["esp_enemy_enabled"]) or false
     self.EnemySettings.Box = getFlagValue(flags["esp_enemy_box"]) or false
@@ -992,6 +1017,10 @@ function ESP:SyncFromFlags(flags)
     self.EnemySettings.ChamsOutline = getFlagValue(flags["esp_enemy_chams_outline"]) or false
     self.EnemySettings.Tool = getFlagValue(flags["esp_enemy_tool"]) or false
     self.EnemySettings.ToolColor = getColorValue(flags["esp_enemy_tool_color"]) or self.EnemySettings.ToolColor
+    self.EnemySettings.VisibleOnly = getFlagValue(flags["esp_enemy_visible_only"]) or false
+    self.EnemySettings.VisibleCheck = getFlagValue(flags["esp_enemy_visible_check"]) or false
+    self.EnemySettings.VisibleColor = getColorValue(flags["esp_enemy_visible_color"]) or self.EnemySettings.VisibleColor
+    self.EnemySettings.OccludedColor = getColorValue(flags["esp_enemy_occluded_color"]) or self.EnemySettings.OccludedColor
     
     self.PrioritySettings.Enabled = getFlagValue(flags["esp_priority_enabled"]) or false
     self.PrioritySettings.Box = getFlagValue(flags["esp_priority_box"]) or false
@@ -1015,6 +1044,10 @@ function ESP:SyncFromFlags(flags)
     self.PrioritySettings.ChamsOutline = getFlagValue(flags["esp_priority_chams_outline"]) or false
     self.PrioritySettings.Tool = getFlagValue(flags["esp_priority_tool"]) or false
     self.PrioritySettings.ToolColor = getColorValue(flags["esp_priority_tool_color"]) or self.PrioritySettings.ToolColor
+    self.PrioritySettings.VisibleOnly = getFlagValue(flags["esp_priority_visible_only"]) or false
+    self.PrioritySettings.VisibleCheck = getFlagValue(flags["esp_priority_visible_check"]) or false
+    self.PrioritySettings.VisibleColor = getColorValue(flags["esp_priority_visible_color"]) or self.PrioritySettings.VisibleColor
+    self.PrioritySettings.OccludedColor = getColorValue(flags["esp_priority_occluded_color"]) or self.PrioritySettings.OccludedColor
 end
 
 function ESP:SyncSelfFromFlags(flags)
@@ -1056,6 +1089,10 @@ function ESP:SyncSelfFromFlags(flags)
     self.SelfSettings.ToolColor = getColorValue(flags["self_esp_tool_color"]) or self.SelfSettings.ToolColor
     self.SelfSettings.Font = getFlagValue(flags["self_esp_font"]) or "Plex"
     self.SelfSettings.FlagsFont = getFlagValue(flags["self_esp_flags_font"]) or "Plex"
+    self.SelfSettings.VisibleOnly = getFlagValue(flags["self_esp_visible_only"]) or false
+    self.SelfSettings.VisibleCheck = getFlagValue(flags["self_esp_visible_check"]) or false
+    self.SelfSettings.VisibleColor = getColorValue(flags["self_esp_visible_color"]) or self.SelfSettings.VisibleColor
+    self.SelfSettings.OccludedColor = getColorValue(flags["self_esp_occluded_color"]) or self.SelfSettings.OccludedColor
 end
 
 function ESP:StartAutoSync(flags_table)
