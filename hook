@@ -2738,7 +2738,7 @@ function library:playerlist(options)
 				library:notification({text = "Stopped spectating", time = 2})
 			end
 		end
-	})
+})
 
 	local button_holder = self:button_holder({})
 	
