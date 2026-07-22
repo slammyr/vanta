@@ -37,24 +37,97 @@ ESP.Settings = {
     VisibleColor = Color3.fromRGB(0, 255, 0),
     OccludedColor = Color3.fromRGB(255, 0, 0),
     TeamCheck = true,
-    FriendlyOnly = false,
-    EnemyOnly = false,
-    PriorityOnly = false,
     OffscreenArrows = false,
     OffscreenArrowColor = Color3.fromRGB(255,255,255),
     OffscreenArrowRadius = 250,
     OffscreenArrowSize = 14,
 }
 
+ESP.FriendlySettings = {
+    Enabled = false,
+    Box = false,
+    BoxColor = Color3.fromRGB(80, 255, 120),
+    BoxType = "Dynamic",
+    Name = false,
+    NameColor = Color3.fromRGB(80, 255, 120),
+    NameType = "DisplayName",
+    HealthBar = false,
+    HealthValue = false,
+    HealthColor = Color3.fromRGB(80, 255, 120),
+    HealthGradient = false,
+    HealthGradientColor = Color3.fromRGB(255, 0, 0),
+    Distance = false,
+    DistanceColor = Color3.fromRGB(80, 255, 120),
+    Skeleton = false,
+    SkeletonColor = Color3.fromRGB(80, 255, 120),
+    Chams = false,
+    ChamsColor = Color3.fromRGB(80, 255, 120),
+    ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+    ChamsOutline = false,
+    Tool = false,
+    ToolColor = Color3.fromRGB(80, 255, 120),
+}
+
+ESP.EnemySettings = {
+    Enabled = false,
+    Box = false,
+    BoxColor = Color3.fromRGB(255, 80, 80),
+    BoxType = "Dynamic",
+    Name = false,
+    NameColor = Color3.fromRGB(255, 80, 80),
+    NameType = "DisplayName",
+    HealthBar = false,
+    HealthValue = false,
+    HealthColor = Color3.fromRGB(255, 80, 80),
+    HealthGradient = false,
+    HealthGradientColor = Color3.fromRGB(255, 0, 0),
+    Distance = false,
+    DistanceColor = Color3.fromRGB(255, 80, 80),
+    Skeleton = false,
+    SkeletonColor = Color3.fromRGB(255, 80, 80),
+    Chams = false,
+    ChamsColor = Color3.fromRGB(255, 80, 80),
+    ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+    ChamsOutline = false,
+    Tool = false,
+    ToolColor = Color3.fromRGB(255, 80, 80),
+}
+
+ESP.PrioritySettings = {
+    Enabled = false,
+    Box = false,
+    BoxColor = Color3.fromRGB(180, 80, 255),
+    BoxType = "Dynamic",
+    Name = false,
+    NameColor = Color3.fromRGB(180, 80, 255),
+    NameType = "DisplayName",
+    HealthBar = false,
+    HealthValue = false,
+    HealthColor = Color3.fromRGB(180, 80, 255),
+    HealthGradient = false,
+    HealthGradientColor = Color3.fromRGB(255, 0, 0),
+    Distance = false,
+    DistanceColor = Color3.fromRGB(180, 80, 255),
+    Skeleton = false,
+    SkeletonColor = Color3.fromRGB(180, 80, 255),
+    Chams = false,
+    ChamsColor = Color3.fromRGB(180, 80, 255),
+    ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+    ChamsOutline = false,
+    Tool = false,
+    ToolColor = Color3.fromRGB(180, 80, 255),
+}
+
 ESP.SelfSettings = {
-    Enabled = true,
-    Box = true,
+    Enabled = false,
+    Box = false,
     BoxColor = Color3.fromRGB(0, 200, 255),
     BoxType = "Dynamic",
     Name = false,
     NameColor = Color3.fromRGB(0, 200, 255),
     NameType = "DisplayName",
     HealthBar = false,
+    HealthValue = false,
     HealthColor = Color3.fromRGB(0, 255, 0),
     HealthGradient = false,
     HealthGradientColor = Color3.fromRGB(255, 0, 0),
@@ -97,6 +170,21 @@ local function GetPlayerPriority(player)
     return tag or "Neutral"
 end
 
+local function GetSettingsForPlayer(player, isSelf)
+    if isSelf then
+        return ESP.SelfSettings
+    end
+    local priority = GetPlayerPriority(player)
+    if priority == "Friendly" then
+        return ESP.FriendlySettings
+    elseif priority == "Enemy" then
+        return ESP.EnemySettings
+    elseif priority == "Priority" then
+        return ESP.PrioritySettings
+    end
+    return ESP.Settings
+end
+
 local function GetESPColor(player, defaultColor, isVisible, isSelf)
     if isSelf then
         return defaultColor
@@ -108,36 +196,20 @@ local function GetESPColor(player, defaultColor, isVisible, isSelf)
             return ESP.Settings.OccludedColor
         end
     end
-    local priority = GetPlayerPriority(player)
-    if priority == "Friendly" then
-        return Color3.fromRGB(80, 255, 120)
-    elseif priority == "Enemy" then
-        return Color3.fromRGB(255, 80, 80)
-    elseif priority == "Priority" then
-        return Color3.fromRGB(180, 80, 255)
-    end
     return defaultColor
 end
 
 local function PassesTagFilter(player)
     if not player then return true end
     local priority = GetPlayerPriority(player)
-    local anyFilterEnabled = ESP.Settings.FriendlyOnly 
-                         or ESP.Settings.EnemyOnly 
-                         or ESP.Settings.PriorityOnly
-    if not anyFilterEnabled then
-        return true
+    if priority == "Friendly" then
+        return ESP.FriendlySettings.Enabled
+    elseif priority == "Enemy" then
+        return ESP.EnemySettings.Enabled
+    elseif priority == "Priority" then
+        return ESP.PrioritySettings.Enabled
     end
-    if ESP.Settings.FriendlyOnly and priority == "Friendly" then
-        return true
-    end
-    if ESP.Settings.EnemyOnly and priority == "Enemy" then
-        return true
-    end
-    if ESP.Settings.PriorityOnly and priority == "Priority" then
-        return true
-    end
-    return false
+    return ESP.Settings.Enabled
 end
 
 local function NewSquare(properties)
@@ -378,8 +450,21 @@ local function DrawPlayerESP(player, isSelf)
     local character = player.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local settings = isSelf and ESP.SelfSettings or ESP.Settings
-    local mainEnabled = isSelf and ESP.SelfSettings.Enabled or ESP.Settings.Enabled
+    
+    local settings
+    if isSelf then
+        settings = ESP.SelfSettings
+    else
+        settings = GetSettingsForPlayer(player, false)
+    end
+    
+    local mainEnabled
+    if isSelf then
+        mainEnabled = ESP.SelfSettings.Enabled
+    else
+        mainEnabled = PassesTagFilter(player)
+    end
+    
     if not mainEnabled or not character or not humanoid or not hrp or humanoid.Health <= 0 then
         HideESPObject(obj)
         return
@@ -394,10 +479,6 @@ local function DrawPlayerESP(player, isSelf)
     end
     if not isSelf then
         if not IsTeam(player) then
-            HideESPObject(obj)
-            return
-        end
-        if not PassesTagFilter(player) then
             HideESPObject(obj)
             return
         end
@@ -861,13 +942,79 @@ function ESP:SyncFromFlags(flags)
     self.Settings.OccludedColor = getColorValue(flags["esp_occluded_color"]) or self.Settings.OccludedColor
     self.Settings.TeamCheck = getFlagValue(flags["esp_teamcheck"])
     if self.Settings.TeamCheck == nil then self.Settings.TeamCheck = true end
-    self.Settings.FriendlyOnly = getFlagValue(flags["esp_friendly_only"]) or false
-    self.Settings.EnemyOnly = getFlagValue(flags["esp_enemy_only"]) or false
-    self.Settings.PriorityOnly = getFlagValue(flags["esp_priority_only"]) or false
     self.Settings.OffscreenArrows = getFlagValue(flags["esp_offscreen_arrows"]) or false
     self.Settings.OffscreenArrowColor = getColorValue(flags["esp_offscreen_arrow_color"]) or self.Settings.OffscreenArrowColor
     self.Settings.OffscreenArrowRadius = getFlagValue(flags["esp_offscreen_arrow_radius"]) or 250
     self.Settings.OffscreenArrowSize = getFlagValue(flags["esp_offscreen_arrow_size"]) or 14
+    
+    self.FriendlySettings.Enabled = getFlagValue(flags["esp_friendly_enabled"]) or false
+    self.FriendlySettings.Box = getFlagValue(flags["esp_friendly_box"]) or false
+    self.FriendlySettings.BoxColor = getColorValue(flags["esp_friendly_box_color"]) or self.FriendlySettings.BoxColor
+    self.FriendlySettings.BoxType = getFlagValue(flags["esp_friendly_box_type"]) or "Dynamic"
+    self.FriendlySettings.Name = getFlagValue(flags["esp_friendly_name"]) or false
+    self.FriendlySettings.NameColor = getColorValue(flags["esp_friendly_name_color"]) or self.FriendlySettings.NameColor
+    self.FriendlySettings.NameType = getFlagValue(flags["esp_friendly_name_type"]) or "DisplayName"
+    self.FriendlySettings.HealthBar = getFlagValue(flags["esp_friendly_healthbar"]) or false
+    self.FriendlySettings.HealthValue = getFlagValue(flags["esp_friendly_healthvalue"]) or false
+    self.FriendlySettings.HealthColor = getColorValue(flags["esp_friendly_health_color"]) or self.FriendlySettings.HealthColor
+    self.FriendlySettings.HealthGradient = getFlagValue(flags["esp_friendly_health_gradient"]) or false
+    self.FriendlySettings.HealthGradientColor = getColorValue(flags["esp_friendly_health_gradient_color"]) or self.FriendlySettings.HealthGradientColor
+    self.FriendlySettings.Distance = getFlagValue(flags["esp_friendly_distance"]) or false
+    self.FriendlySettings.DistanceColor = getColorValue(flags["esp_friendly_distance_color"]) or self.FriendlySettings.DistanceColor
+    self.FriendlySettings.Skeleton = getFlagValue(flags["esp_friendly_skeleton"]) or false
+    self.FriendlySettings.SkeletonColor = getColorValue(flags["esp_friendly_skeleton_color"]) or self.FriendlySettings.SkeletonColor
+    self.FriendlySettings.Chams = getFlagValue(flags["esp_friendly_chams"]) or false
+    self.FriendlySettings.ChamsColor = getColorValue(flags["esp_friendly_chams_color"]) or self.FriendlySettings.ChamsColor
+    self.FriendlySettings.ChamsOutlineColor = getColorValue(flags["esp_friendly_chams_outline_color"]) or self.FriendlySettings.ChamsOutlineColor
+    self.FriendlySettings.ChamsOutline = getFlagValue(flags["esp_friendly_chams_outline"]) or false
+    self.FriendlySettings.Tool = getFlagValue(flags["esp_friendly_tool"]) or false
+    self.FriendlySettings.ToolColor = getColorValue(flags["esp_friendly_tool_color"]) or self.FriendlySettings.ToolColor
+    
+    self.EnemySettings.Enabled = getFlagValue(flags["esp_enemy_enabled"]) or false
+    self.EnemySettings.Box = getFlagValue(flags["esp_enemy_box"]) or false
+    self.EnemySettings.BoxColor = getColorValue(flags["esp_enemy_box_color"]) or self.EnemySettings.BoxColor
+    self.EnemySettings.BoxType = getFlagValue(flags["esp_enemy_box_type"]) or "Dynamic"
+    self.EnemySettings.Name = getFlagValue(flags["esp_enemy_name"]) or false
+    self.EnemySettings.NameColor = getColorValue(flags["esp_enemy_name_color"]) or self.EnemySettings.NameColor
+    self.EnemySettings.NameType = getFlagValue(flags["esp_enemy_name_type"]) or "DisplayName"
+    self.EnemySettings.HealthBar = getFlagValue(flags["esp_enemy_healthbar"]) or false
+    self.EnemySettings.HealthValue = getFlagValue(flags["esp_enemy_healthvalue"]) or false
+    self.EnemySettings.HealthColor = getColorValue(flags["esp_enemy_health_color"]) or self.EnemySettings.HealthColor
+    self.EnemySettings.HealthGradient = getFlagValue(flags["esp_enemy_health_gradient"]) or false
+    self.EnemySettings.HealthGradientColor = getColorValue(flags["esp_enemy_health_gradient_color"]) or self.EnemySettings.HealthGradientColor
+    self.EnemySettings.Distance = getFlagValue(flags["esp_enemy_distance"]) or false
+    self.EnemySettings.DistanceColor = getColorValue(flags["esp_enemy_distance_color"]) or self.EnemySettings.DistanceColor
+    self.EnemySettings.Skeleton = getFlagValue(flags["esp_enemy_skeleton"]) or false
+    self.EnemySettings.SkeletonColor = getColorValue(flags["esp_enemy_skeleton_color"]) or self.EnemySettings.SkeletonColor
+    self.EnemySettings.Chams = getFlagValue(flags["esp_enemy_chams"]) or false
+    self.EnemySettings.ChamsColor = getColorValue(flags["esp_enemy_chams_color"]) or self.EnemySettings.ChamsColor
+    self.EnemySettings.ChamsOutlineColor = getColorValue(flags["esp_enemy_chams_outline_color"]) or self.EnemySettings.ChamsOutlineColor
+    self.EnemySettings.ChamsOutline = getFlagValue(flags["esp_enemy_chams_outline"]) or false
+    self.EnemySettings.Tool = getFlagValue(flags["esp_enemy_tool"]) or false
+    self.EnemySettings.ToolColor = getColorValue(flags["esp_enemy_tool_color"]) or self.EnemySettings.ToolColor
+    
+    self.PrioritySettings.Enabled = getFlagValue(flags["esp_priority_enabled"]) or false
+    self.PrioritySettings.Box = getFlagValue(flags["esp_priority_box"]) or false
+    self.PrioritySettings.BoxColor = getColorValue(flags["esp_priority_box_color"]) or self.PrioritySettings.BoxColor
+    self.PrioritySettings.BoxType = getFlagValue(flags["esp_priority_box_type"]) or "Dynamic"
+    self.PrioritySettings.Name = getFlagValue(flags["esp_priority_name"]) or false
+    self.PrioritySettings.NameColor = getColorValue(flags["esp_priority_name_color"]) or self.PrioritySettings.NameColor
+    self.PrioritySettings.NameType = getFlagValue(flags["esp_priority_name_type"]) or "DisplayName"
+    self.PrioritySettings.HealthBar = getFlagValue(flags["esp_priority_healthbar"]) or false
+    self.PrioritySettings.HealthValue = getFlagValue(flags["esp_priority_healthvalue"]) or false
+    self.PrioritySettings.HealthColor = getColorValue(flags["esp_priority_health_color"]) or self.PrioritySettings.HealthColor
+    self.PrioritySettings.HealthGradient = getFlagValue(flags["esp_priority_health_gradient"]) or false
+    self.PrioritySettings.HealthGradientColor = getColorValue(flags["esp_priority_health_gradient_color"]) or self.PrioritySettings.HealthGradientColor
+    self.PrioritySettings.Distance = getFlagValue(flags["esp_priority_distance"]) or false
+    self.PrioritySettings.DistanceColor = getColorValue(flags["esp_priority_distance_color"]) or self.PrioritySettings.DistanceColor
+    self.PrioritySettings.Skeleton = getFlagValue(flags["esp_priority_skeleton"]) or false
+    self.PrioritySettings.SkeletonColor = getColorValue(flags["esp_priority_skeleton_color"]) or self.PrioritySettings.SkeletonColor
+    self.PrioritySettings.Chams = getFlagValue(flags["esp_priority_chams"]) or false
+    self.PrioritySettings.ChamsColor = getColorValue(flags["esp_priority_chams_color"]) or self.PrioritySettings.ChamsColor
+    self.PrioritySettings.ChamsOutlineColor = getColorValue(flags["esp_priority_chams_outline_color"]) or self.PrioritySettings.ChamsOutlineColor
+    self.PrioritySettings.ChamsOutline = getFlagValue(flags["esp_priority_chams_outline"]) or false
+    self.PrioritySettings.Tool = getFlagValue(flags["esp_priority_tool"]) or false
+    self.PrioritySettings.ToolColor = getColorValue(flags["esp_priority_tool_color"]) or self.PrioritySettings.ToolColor
 end
 
 function ESP:SyncSelfFromFlags(flags)
