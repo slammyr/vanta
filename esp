@@ -1,0 +1,1059 @@
+
+local ESP = {}
+ESP.__index = ESP
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+
+-- Settings
+ESP.Settings = {
+    Enabled = false,
+    Box = false,
+    BoxColor = Color3.fromRGB(255, 255, 255),
+    BoxType = "Dynamic",
+    Name = false,
+    NameColor = Color3.fromRGB(255, 255, 255),
+    NameType = "DisplayName",
+    HealthBar = false,
+    HealthValue = false,
+    HealthColor = Color3.fromRGB(0, 255, 0),
+    HealthGradient = false,
+    HealthGradientColor = Color3.fromRGB(255, 0, 0),
+    Distance = false,
+    DistanceColor = Color3.fromRGB(255, 255, 255),
+    Skeleton = false,
+    SkeletonColor = Color3.fromRGB(255, 255, 255),
+    Chams = false,
+    ChamsColor = Color3.fromRGB(255, 0, 0),
+    ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+    ChamsOutline = false,
+    Tool = false,
+    ToolColor = Color3.fromRGB(255, 255, 255),
+    MaxDistance = 1000,
+    Font = "Plex",
+    FlagsFont = "Plex",
+    VisibleOnly = false,
+    VisibleCheck = false,
+    VisibleColor = Color3.fromRGB(0, 255, 0),
+    OccludedColor = Color3.fromRGB(255, 0, 0),
+    TeamCheck = true,
+    FriendlyOnly = false,
+    EnemyOnly = false,
+    PriorityOnly = false,
+    OffscreenArrows = false,
+    OffscreenArrowColor = Color3.fromRGB(255,255,255),
+    OffscreenArrowRadius = 250,
+    OffscreenArrowSize = 14,
+}
+
+-- Cache of ESP objects per player
+ESP.Objects = {}
+ESP.Connection = nil
+
+-- Font mapping
+local FontMap = {
+    ["Plex"] = 2,
+    ["Monospace"] = 3,
+}
+
+local function GetFont(name)
+    return FontMap[name] or 2
+end
+
+-- Get priority from library playerlist
+local function GetPlayerPriority(player)
+    if not player then return "Neutral" end
+
+    -- Check if library and playerlist data exist
+    if library and library.playerlist_data then
+        local playerData = library.playerlist_data[player.Name]
+        if playerData and playerData.priority then
+            return playerData.priority
+        end
+    end
+
+    -- Fallback to _G.PlayerTags
+    local tag = _G.PlayerTags and _G.PlayerTags[player.Name]
+    return tag or "Neutral"
+end
+
+local function GetESPColor(player, defaultColor, isVisible)
+    -- If VisibleCheck is enabled, override colors based on visibility
+    if ESP.Settings.VisibleCheck then
+        if isVisible then
+            return ESP.Settings.VisibleColor
+        else
+            return ESP.Settings.OccludedColor
+        end
+    end
+
+    local priority = GetPlayerPriority(player)
+
+    if priority == "Friendly" then
+        return Color3.fromRGB(80, 255, 120)
+    elseif priority == "Enemy" then
+        return Color3.fromRGB(255, 80, 80)
+    elseif priority == "Priority" then
+        return Color3.fromRGB(180, 80, 255)
+    end
+
+    return defaultColor
+end
+
+local function PassesTagFilter(player)
+    if not player then return true end
+
+    local priority = GetPlayerPriority(player)
+
+    -- Check if any filter is enabled
+    local anyFilterEnabled = ESP.Settings.FriendlyOnly 
+                         or ESP.Settings.EnemyOnly 
+                         or ESP.Settings.PriorityOnly
+
+    if not anyFilterEnabled then
+        return true
+    end
+
+    if ESP.Settings.FriendlyOnly and priority == "Friendly" then
+        return true
+    end
+
+    if ESP.Settings.EnemyOnly and priority == "Enemy" then
+        return true
+    end
+
+    if ESP.Settings.PriorityOnly and priority == "Priority" then
+        return true
+    end
+
+    return false
+end
+
+-- Drawing utility
+local function NewSquare(properties)
+    local square = Drawing.new("Square")
+    square.Visible = false
+    square.Thickness = properties.Thickness or 1
+    square.Color = properties.Color or Color3.new(1, 1, 1)
+    square.Transparency = properties.Transparency or 1
+    square.Filled = properties.Filled or false
+    return square
+end
+
+local function NewText(properties)
+    local text = Drawing.new("Text")
+    text.Visible = false
+    text.Color = properties.Color or Color3.new(1, 1, 1)
+    text.Size = properties.Size or 13
+    text.Center = properties.Center or false
+    text.Outline = properties.Outline or false
+    text.OutlineColor = properties.OutlineColor or Color3.new(0, 0, 0)
+    text.Font = properties.Font or 2
+    text.Transparency = properties.Transparency or 1
+    return text
+end
+
+-- Create ESP drawings for a player
+local function CreateESPObject()
+    local obj = {}
+
+    -- Box outline (black, thickness 3 to create a 1px border around the 1px main box)
+    obj.BoxOutline = NewSquare({Thickness = 3, Color = Color3.new(0, 0, 0)})
+
+    -- Box main (1px crisp line)
+    obj.Box = NewSquare({Thickness = 1, Color = Color3.new(1, 1, 1)})
+
+    -- Name text (centered above box, with outline for readability)
+    obj.Name = NewText({Size = 13, Center = true, Outline = true, OutlineColor = Color3.new(0, 0, 0)})
+
+    -- Health bar (left side of box)
+    obj.HealthBarOutline = NewSquare({Thickness = 1, Color = Color3.new(0, 0, 0), Filled = true})
+    obj.HealthBarBackground = NewSquare({Thickness = 1, Color = Color3.new(0, 0, 0), Filled = true})
+    obj.HealthBar = NewSquare({Thickness = 1, Color = Color3.new(0, 1, 0), Filled = true})
+    obj.HealthValue = NewText({Size = 11, Center = false, Outline = true, OutlineColor = Color3.new(0, 0, 0)})
+
+    -- Gradient segments (filled squares that tile the bar height)
+    local GRADIENT_SEGMENTS = 24
+    obj.GradientLines = {}
+    for i = 1, GRADIENT_SEGMENTS do
+        obj.GradientLines[i] = Drawing.new("Square")
+        obj.GradientLines[i].Visible = false
+        obj.GradientLines[i].Filled = true
+        obj.GradientLines[i].Thickness = 0
+        obj.GradientLines[i].Transparency = 1
+    end
+
+    -- Distance text (centered below box)
+    obj.Distance = NewText({Size = 13, Center = true, Outline = true, OutlineColor = Color3.new(0, 0, 0)})
+
+    -- Tool text (centered below box, under distance)
+    obj.Tool = NewText({Size = 13, Center = true, Outline = true, OutlineColor = Color3.new(0, 0, 0)})
+
+    -- Skeleton lines (outline + colored for each bone)
+    local MAX_BONES = 14
+    obj.SkeletonOutlines = {}
+    obj.SkeletonLines = {}
+    for i = 1, MAX_BONES do
+        local outline = Drawing.new("Line")
+        outline.Visible = false
+        outline.Thickness = 3
+        outline.Color = Color3.new(0, 0, 0)
+        outline.Transparency = 0.65
+        obj.SkeletonOutlines[i] = outline
+
+        local line = Drawing.new("Line")
+        line.Visible = false
+        line.Thickness = 1
+        line.Color = Color3.new(1, 1, 1)
+        line.Transparency = 1
+        obj.SkeletonLines[i] = line
+    end
+
+    obj.OffscreenArrow = Drawing.new("Triangle")
+    obj.OffscreenArrow.Visible = false
+    obj.OffscreenArrow.Filled = true
+    obj.OffscreenArrow.Transparency = 1
+    obj.OffscreenArrow.Color = Color3.new(1,1,1)
+
+    obj.SmoothedHealth = 1
+
+    return obj
+end
+
+-- Destroy ESP drawings for a player
+local function DestroyESPObject(obj)
+    if obj.OffscreenArrow then
+        pcall(function()
+            obj.OffscreenArrow:Remove()
+        end)
+    end
+
+    if not obj then return end
+    if obj.Highlight then
+        pcall(function() obj.Highlight:Destroy() end)
+        obj.Highlight = nil
+    end
+    for key, val in pairs(obj) do
+        if type(val) == "table" then
+            for _, drawing in ipairs(val) do
+                pcall(function() drawing:Remove() end)
+            end
+        elseif typeof(val) ~= "number" then
+            pcall(function() val:Remove() end)
+        end
+    end
+
+end
+
+-- Hide all drawings in an ESP object
+local function HideESPObject(obj)
+    if not obj then return end
+    if obj.Highlight then
+        pcall(function() obj.Highlight.Enabled = false end)
+    end
+    for key, val in pairs(obj) do
+        if type(val) == "table" then
+            for _, drawing in ipairs(val) do
+                pcall(function() drawing.Visible = false end)
+            end
+        elseif typeof(val) ~= "number" then
+            pcall(function() val.Visible = false end)
+        end
+    end
+    if obj.OffscreenArrow then
+        obj.OffscreenArrow.Visible = false
+    end
+end
+
+-- Get bounding box from character limbs (dynamic sizing)
+-- Projects all part corners to screen space for accurate sizing
+local function GetDynamicBoundingBox(character)
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local onScreen = false
+
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local cf = part.CFrame
+            local size = part.Size
+            local sx, sy, sz = size.X / 2, size.Y / 2, size.Z / 2
+
+            -- 8 corners of each limb/part bounding box
+            local corners = {
+                cf * Vector3.new(sx, sy, sz),
+                cf * Vector3.new(sx, sy, -sz),
+                cf * Vector3.new(sx, -sy, sz),
+                cf * Vector3.new(sx, -sy, -sz),
+                cf * Vector3.new(-sx, sy, sz),
+                cf * Vector3.new(-sx, sy, -sz),
+                cf * Vector3.new(-sx, -sy, sz),
+                cf * Vector3.new(-sx, -sy, -sz),
+            }
+
+            for _, corner in ipairs(corners) do
+                local screenPos, visible = Camera:WorldToViewportPoint(corner)
+                if visible then
+                    onScreen = true
+                    if screenPos.X < minX then minX = screenPos.X end
+                    if screenPos.Y < minY then minY = screenPos.Y end
+                    if screenPos.X > maxX then maxX = screenPos.X end
+                    if screenPos.Y > maxY then maxY = screenPos.Y end
+                end
+            end
+        end
+    end
+
+    if not onScreen or minX == math.huge then
+        return nil
+    end
+
+    return {
+        X = math.floor(minX),
+        Y = math.floor(minY),
+        Width = math.floor(maxX - minX),
+        Height = math.floor(maxY - minY)
+    }
+end
+
+-- Get static bounding box (proportional from root, head-to-foot ratio)
+local function GetStaticBoundingBox(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local head = character:FindFirstChild("Head")
+    if not hrp or not head then return nil end
+
+    local topPos = head.Position + Vector3.new(0, head.Size.Y / 2 + 0.5, 0)
+    local bottomPos = hrp.Position - Vector3.new(0, 3, 0)
+
+    local screenTop, visibleTop = Camera:WorldToViewportPoint(topPos)
+    local screenBottom, visibleBottom = Camera:WorldToViewportPoint(bottomPos)
+
+    if not visibleTop or not visibleBottom then return nil end
+
+    local height = math.abs(screenBottom.Y - screenTop.Y)
+    local width = height * 0.55
+
+    local centerX = (screenTop.X + screenBottom.X) / 2
+
+    return {
+        X = math.floor(centerX - width / 2),
+        Y = math.floor(screenTop.Y),
+        Width = math.floor(width),
+        Height = math.floor(height)
+    }
+end
+
+-- Get bounding box based on current type setting
+local function GetBoundingBox(character)
+    if ESP.Settings.BoxType == "Dynamic" then
+        return GetDynamicBoundingBox(character)
+    else
+        return GetStaticBoundingBox(character)
+    end
+end
+
+-- Team check
+local function IsTeam(player)
+    if not ESP.Settings.TeamCheck then return true end
+    local pTeam = player.Team
+    local lTeam = LocalPlayer.Team
+    if not pTeam or not lTeam then return true end
+    if pTeam.Name == "Neutral" or lTeam.Name == "Neutral" then return true end
+    return pTeam ~= lTeam
+end
+
+-- Occlusion check via raycast
+local RaycastParams = RaycastParams.new()
+RaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function IsVisible(character, hrp)
+    local origin = Camera.CFrame.Position
+    local target = hrp.Position
+    local direction = (target - origin)
+
+    -- Exclude local player's character and the target character from the ray
+    local filterInstances = {character}
+    local localChar = LocalPlayer.Character
+    if localChar then
+        table.insert(filterInstances, localChar)
+    end
+
+    RaycastParams.FilterDescendantsInstances = filterInstances
+
+    local result = workspace:Raycast(origin, direction, RaycastParams)
+    return result == nil
+end
+
+local function GetOffscreenArrow(worldPos, radius, size)
+    local viewport = Camera.ViewportSize
+    local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+
+    local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
+
+    if onScreen and screenPos.Z > 0 then
+        return nil
+    end
+
+    local dir
+
+    if screenPos.Z <= 0 then
+        dir = (center - Vector2.new(screenPos.X, screenPos.Y)).Unit
+    else
+        dir = (Vector2.new(screenPos.X, screenPos.Y) - center).Unit
+    end
+
+    local pos = center + dir * radius
+
+    local perp = Vector2.new(-dir.Y, dir.X)
+
+    local tip = pos + dir * size
+    local left = pos - dir * size + perp * size * 0.7
+    local right = pos - dir * size - perp * size * 0.7
+
+    return tip, left, right
+end
+
+local function UpdateESP()
+    Camera = workspace.CurrentCamera
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+
+        -- Create object cache if missing
+        if not ESP.Objects[player] then
+            ESP.Objects[player] = CreateESPObject()
+        end
+
+        local obj = ESP.Objects[player]
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+
+        if not ESP.Settings.Enabled or not character or not humanoid or not hrp or humanoid.Health <= 0 then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- Distance check
+        local distance = (Camera.CFrame.Position - hrp.Position).Magnitude
+        if distance > ESP.Settings.MaxDistance then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- Team check
+        if not IsTeam(player) then
+            HideESPObject(obj)
+            continue
+        end
+
+        if not PassesTagFilter(player) then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- Check visibility once for this player
+        local isVisible = IsVisible(character, hrp)
+
+        -- VisibleOnly: hide ESP if player is occluded (can't see them)
+        if ESP.Settings.VisibleOnly and not isVisible then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- Offscreen Arrows
+        if ESP.Settings.OffscreenArrows and hrp then
+            local screenPos = Camera:WorldToViewportPoint(hrp.Position)
+            local viewport = Camera.ViewportSize
+
+            local isFullyOffscreen =
+                screenPos.X < -100 or
+                screenPos.X > viewport.X + 100 or
+                screenPos.Y < -100 or
+                screenPos.Y > viewport.Y + 100 or
+                screenPos.Z <= 0
+
+            if isFullyOffscreen then
+                local tip, left, right = GetOffscreenArrow(
+                    hrp.Position,
+                    ESP.Settings.OffscreenArrowRadius,
+                    ESP.Settings.OffscreenArrowSize
+                )
+
+                if tip then
+                    obj.OffscreenArrow.PointA = tip
+                    obj.OffscreenArrow.PointB = left
+                    obj.OffscreenArrow.PointC = right
+                    obj.OffscreenArrow.Color = GetESPColor(
+                        player,
+                        ESP.Settings.OffscreenArrowColor,
+                        isVisible
+                    )
+                    obj.OffscreenArrow.Visible = true
+                end
+
+                -- Hide all other ESP elements when fully offscreen
+                HideESPObject(obj)
+                -- But keep arrow visible if it was set
+                if tip then
+                    obj.OffscreenArrow.Visible = true
+                end
+                continue
+            else
+                obj.OffscreenArrow.Visible = false
+            end
+        elseif obj.OffscreenArrow then
+            obj.OffscreenArrow.Visible = false
+        end
+
+        -- Compute bounding box
+        local bounds = GetBoundingBox(character)
+
+        -- If bounding box is nil or too small to render, hide everything
+        if not bounds or bounds.Width < 1 or bounds.Height < 1 then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- Clamp bounds to viewport to prevent drawings from stretching infinitely
+        local viewport = Camera.ViewportSize
+        local clampedX = math.max(bounds.X, -500)
+        local clampedY = math.max(bounds.Y, -500)
+        local clampedWidth = math.min(bounds.Width, viewport.X + 1000)
+        local clampedHeight = math.min(bounds.Height, viewport.Y + 1000)
+
+        -- Calculate how much of the box is visible (for potential transparency scaling)
+        local visibleX = math.max(0, math.min(bounds.X + bounds.Width, viewport.X) - math.max(bounds.X, 0))
+        local visibleY = math.max(0, math.min(bounds.Y + bounds.Height, viewport.Y) - math.max(bounds.Y, 0))
+        local visibleArea = (visibleX * visibleY) / (bounds.Width * bounds.Height + 1)
+
+        -- If less than 5% of the box is visible, hide it (prevents tiny artifacts)
+        if visibleArea < 0.05 then
+            HideESPObject(obj)
+            continue
+        end
+
+        -- ═══════════════════════ NAME ESP ═══════════════════════
+        if ESP.Settings.Name then
+            -- Only show name if box is reasonably on-screen
+            local nameY = bounds.Y - 16
+            if nameY > -50 then  -- Don't render name if it's too far off-screen
+                obj.Name.Text = ESP.Settings.NameType == "Username" and player.Name or player.DisplayName
+                obj.Name.Position = Vector2.new(clampedX + clampedWidth / 2, nameY)
+                obj.Name.Color = GetESPColor(player, ESP.Settings.NameColor, isVisible)
+                obj.Name.Font = GetFont(ESP.Settings.Font)
+                obj.Name.Visible = true
+            else
+                obj.Name.Visible = false
+            end
+        else
+            obj.Name.Visible = false
+        end
+
+        -- ═══════════════════════ BOX ESP ═══════════════════════
+        if ESP.Settings.Box then
+            local pos = Vector2.new(clampedX, clampedY)
+            local size = Vector2.new(clampedWidth, clampedHeight)
+
+            -- Outline (black, thickness 3 → creates 1px border around the 1px inner box)
+            obj.BoxOutline.Position = pos
+            obj.BoxOutline.Size = size
+            obj.BoxOutline.Color = Color3.new(0, 0, 0)
+            obj.BoxOutline.Transparency = 0.65
+            obj.BoxOutline.Thickness = 3
+            obj.BoxOutline.Visible = true
+
+            -- Main box
+            obj.Box.Position = pos
+            obj.Box.Size = size
+            obj.Box.Color = GetESPColor(player, ESP.Settings.BoxColor, isVisible)
+            obj.Box.Transparency = 1
+            obj.Box.Thickness = 1
+            obj.Box.Visible = true
+        else
+            obj.BoxOutline.Visible = false
+            obj.Box.Visible = false
+        end
+
+        -- ═══════════════════════ HEALTH BAR ═══════════════════════
+        if ESP.Settings.HealthBar then
+            local healthFraction
+            local nrpbs = player:FindFirstChild("NRPBS")
+            if nrpbs and nrpbs:FindFirstChild("Health") then
+                local h = nrpbs.Health.Value
+                local maxH = nrpbs:FindFirstChild("MaxHealth") and nrpbs.MaxHealth.Value or 100
+                healthFraction = math.clamp(h / maxH, 0, 1)
+            else
+                healthFraction = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+            end
+
+            -- Smooth lerp toward actual health
+            obj.SmoothedHealth = obj.SmoothedHealth + (healthFraction - obj.SmoothedHealth) * 0.1
+            if math.abs(obj.SmoothedHealth - healthFraction) < 0.001 then
+                obj.SmoothedHealth = healthFraction
+            end
+            local smoothed = obj.SmoothedHealth
+
+            local barWidth = 2
+            local padding = 4
+            local barX = bounds.X - padding - barWidth
+            local barY = bounds.Y
+            local barHeight = bounds.Height
+            local fillHeight = math.floor(barHeight * smoothed)
+
+            -- Only render if bar is reasonably on-screen
+            local barVisible = barX + barWidth > -50 and barX < viewport.X + 50 and 
+                              barY + barHeight > -50 and barY < viewport.Y + 50
+
+            if barVisible then
+                -- Outline (1px black border around the full bar)
+                obj.HealthBarOutline.Position = Vector2.new(barX - 1, barY - 1)
+                obj.HealthBarOutline.Size = Vector2.new(barWidth + 2, barHeight + 2)
+                obj.HealthBarOutline.Color = Color3.new(0, 0, 0)
+                obj.HealthBarOutline.Transparency = 0.65
+                obj.HealthBarOutline.Visible = true
+
+                -- Dark background
+                obj.HealthBarBackground.Position = Vector2.new(barX, barY)
+                obj.HealthBarBackground.Size = Vector2.new(barWidth, barHeight)
+                obj.HealthBarBackground.Color = Color3.fromRGB(20, 20, 20)
+                obj.HealthBarBackground.Transparency = 1
+                obj.HealthBarBackground.Visible = true
+
+                -- Colored fill
+                if ESP.Settings.HealthGradient and fillHeight > 0 then
+                    obj.HealthBar.Visible = false
+                    local topColor = ESP.Settings.HealthColor
+                    local bottomColor = ESP.Settings.HealthGradientColor
+                    local segments = obj.GradientLines
+                    local segCount = #segments
+                    local fillTop = barY + (barHeight - fillHeight)
+
+                    local segHeight = fillHeight / segCount
+                    for i = 1, segCount do
+                        local t = (i - 1) / (segCount - 1)
+                        local segY = fillTop + (i - 1) * segHeight
+                        local segH = math.ceil(segHeight)
+
+                        local r = math.floor(topColor.R * 255 * (1 - t) + bottomColor.R * 255 * t)
+                        local g = math.floor(topColor.G * 255 * (1 - t) + bottomColor.G * 255 * t)
+                        local b = math.floor(topColor.B * 255 * (1 - t) + bottomColor.B * 255 * t)
+
+                        segments[i].Position = Vector2.new(barX, math.floor(segY))
+                        segments[i].Size = Vector2.new(barWidth, segH)
+                        segments[i].Color = Color3.fromRGB(r, g, b)
+                        segments[i].Visible = true
+                    end
+                else
+                    for _, line in ipairs(obj.GradientLines) do
+                        line.Visible = false
+                    end
+                    obj.HealthBar.Position = Vector2.new(barX, barY + (barHeight - fillHeight))
+                    obj.HealthBar.Size = Vector2.new(barWidth, fillHeight)
+                    obj.HealthBar.Color = ESP.Settings.HealthColor
+                    obj.HealthBar.Transparency = 1
+                    obj.HealthBar.Visible = fillHeight > 0
+                end
+            else
+                obj.HealthBarOutline.Visible = false
+                obj.HealthBarBackground.Visible = false
+                obj.HealthBar.Visible = false
+                for _, line in ipairs(obj.GradientLines) do
+                    line.Visible = false
+                end
+            end
+        else
+            obj.HealthBarOutline.Visible = false
+            obj.HealthBarBackground.Visible = false
+            obj.HealthBar.Visible = false
+            for _, line in ipairs(obj.GradientLines) do
+                line.Visible = false
+            end
+        end
+
+        -- ═══════════════════════ HEALTH VALUE ═══════════════════════
+        if ESP.Settings.HealthValue then
+            local nrpbs2 = player:FindFirstChild("NRPBS")
+            local displayHP
+            if nrpbs2 and nrpbs2:FindFirstChild("Health") then
+                displayHP = math.floor(nrpbs2.Health.Value)
+            else
+                displayHP = math.floor(humanoid.Health)
+            end
+            obj.HealthValue.Text = tostring(displayHP)
+            obj.HealthValue.Font = GetFont(ESP.Settings.FlagsFont)
+            local barWidth = 2
+            local padding = 4
+            local barX = bounds.X - padding - barWidth
+            local barY = bounds.Y
+            local barHeight = bounds.Height
+            local healthFractionV
+            if nrpbs2 and nrpbs2:FindFirstChild("Health") then
+                local h = nrpbs2.Health.Value
+                local maxH = nrpbs2:FindFirstChild("MaxHealth") and nrpbs2.MaxHealth.Value or 100
+                healthFractionV = math.clamp(h / maxH, 0, 1)
+            else
+                healthFractionV = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+            end
+            local fillH = math.floor(barHeight * healthFractionV)
+            local hpX = barX - obj.HealthValue.TextBounds.X - 2
+            local hpY = barY + (barHeight - fillH) - 6
+
+            -- Only show if text would be visible
+            if hpX > -100 and hpX < viewport.X + 100 and hpY > -100 and hpY < viewport.Y + 100 then
+                obj.HealthValue.Position = Vector2.new(hpX, hpY)
+                obj.HealthValue.Color = Color3.fromRGB(255, 255, 255)
+                obj.HealthValue.Transparency = 1
+                obj.HealthValue.Visible = true
+            else
+                obj.HealthValue.Visible = false
+            end
+        else
+            obj.HealthValue.Visible = false
+        end
+
+        -- ═══════════════════════ SKELETON ESP ═══════════════════════
+        if ESP.Settings.Skeleton then
+            local bones = {}
+
+            -- Detect R15 vs R6
+            local isR15 = character:FindFirstChild("UpperTorso") ~= nil
+
+            if isR15 then
+                bones = {
+                    {"Head", "UpperTorso"},
+                    {"UpperTorso", "LowerTorso"},
+                    {"UpperTorso", "LeftUpperArm"},
+                    {"LeftUpperArm", "LeftLowerArm"},
+                    {"LeftLowerArm", "LeftHand"},
+                    {"UpperTorso", "RightUpperArm"},
+                    {"RightUpperArm", "RightLowerArm"},
+                    {"RightLowerArm", "RightHand"},
+                    {"LowerTorso", "LeftUpperLeg"},
+                    {"LeftUpperLeg", "LeftLowerLeg"},
+                    {"LeftLowerLeg", "LeftFoot"},
+                    {"LowerTorso", "RightUpperLeg"},
+                    {"RightUpperLeg", "RightLowerLeg"},
+                    {"RightLowerLeg", "RightFoot"},
+                }
+            else
+                -- R6: compute joint positions manually for a proper stick figure
+                local head = character:FindFirstChild("Head")
+                local torso = character:FindFirstChild("Torso")
+                local lArm = character:FindFirstChild("Left Arm")
+                local rArm = character:FindFirstChild("Right Arm")
+                local lLeg = character:FindFirstChild("Left Leg")
+                local rLeg = character:FindFirstChild("Right Leg")
+
+                if head and torso then
+                    local torsoTop = (torso.CFrame * CFrame.new(0, 1, 0)).Position
+                    local torsoBot = (torso.CFrame * CFrame.new(0, -1, 0)).Position
+
+                    -- Head → Torso top (neck)
+                    bones[#bones + 1] = {head.Position, torsoTop}
+                    -- Torso spine
+                    bones[#bones + 1] = {torsoTop, torsoBot}
+
+                    if lArm and rArm then
+                        local lArmTop = (lArm.CFrame * CFrame.new(0, 0.5, 0)).Position
+                        local rArmTop = (rArm.CFrame * CFrame.new(0, 0.5, 0)).Position
+                        local lArmBot = (lArm.CFrame * CFrame.new(0, -1, 0)).Position
+                        local rArmBot = (rArm.CFrame * CFrame.new(0, -1, 0)).Position
+
+                        -- Shoulder line
+                        bones[#bones + 1] = {lArmTop, rArmTop}
+                        -- Left arm
+                        bones[#bones + 1] = {lArmTop, lArmBot}
+                        -- Right arm
+                        bones[#bones + 1] = {rArmTop, rArmBot}
+                    end
+
+                    if lLeg and rLeg then
+                        local lLegTop = (lLeg.CFrame * CFrame.new(0, 1, 0)).Position
+                        local rLegTop = (rLeg.CFrame * CFrame.new(0, 1, 0)).Position
+                        local lLegBot = (lLeg.CFrame * CFrame.new(0, -1, 0)).Position
+                        local rLegBot = (rLeg.CFrame * CFrame.new(0, -1, 0)).Position
+
+                        -- Hip diagonals
+                        bones[#bones + 1] = {torsoBot, lLegTop}
+                        bones[#bones + 1] = {torsoBot, rLegTop}
+                        -- Legs
+                        bones[#bones + 1] = {lLegTop, lLegBot}
+                        bones[#bones + 1] = {rLegTop, rLegBot}
+                    end
+                end
+            end
+
+            local boneIndex = 0
+            for _, bone in ipairs(bones) do
+                local worldA, worldB
+
+                -- R15 uses part name pairs, R6 uses pre-computed Vector3 pairs
+                if type(bone[1]) == "string" then
+                    local partA = character:FindFirstChild(bone[1])
+                    local partB = character:FindFirstChild(bone[2])
+                    if not partA or not partB then continue end
+                    worldA = partA.Position
+                    worldB = partB.Position
+                else
+                    worldA = bone[1]
+                    worldB = bone[2]
+                end
+
+                local posA, visA = Camera:WorldToViewportPoint(worldA)
+                local posB, visB = Camera:WorldToViewportPoint(worldB)
+
+                if visA and visB then
+                    -- Only render if at least one point is reasonably on-screen
+                    local onScreen = (posA.X > -100 and posA.X < viewport.X + 100 and 
+                                      posA.Y > -100 and posA.Y < viewport.Y + 100) or
+                                     (posB.X > -100 and posB.X < viewport.X + 100 and 
+                                      posB.Y > -100 and posB.Y < viewport.Y + 100)
+
+                    if onScreen then
+                        boneIndex = boneIndex + 1
+                        local from = Vector2.new(posA.X, posA.Y)
+                        local to = Vector2.new(posB.X, posB.Y)
+
+                        -- Outline
+                        obj.SkeletonOutlines[boneIndex].From = from
+                        obj.SkeletonOutlines[boneIndex].To = to
+                        obj.SkeletonOutlines[boneIndex].Visible = true
+
+                        -- Colored line
+                        obj.SkeletonLines[boneIndex].From = from
+                        obj.SkeletonLines[boneIndex].To = to
+                        obj.SkeletonLines[boneIndex].Color = GetESPColor(player, ESP.Settings.SkeletonColor, isVisible)
+                        obj.SkeletonLines[boneIndex].Visible = true
+                    end
+                end
+            end
+
+            -- Hide unused lines
+            for i = boneIndex + 1, #obj.SkeletonOutlines do
+                obj.SkeletonOutlines[i].Visible = false
+                obj.SkeletonLines[i].Visible = false
+            end
+        else
+            for i = 1, #obj.SkeletonOutlines do
+                obj.SkeletonOutlines[i].Visible = false
+                obj.SkeletonLines[i].Visible = false
+            end
+        end
+
+        -- ═══════════════════════ CHAMS ESP ═══════════════════════
+        if ESP.Settings.Chams then
+            if not obj.Highlight or not obj.Highlight.Parent then
+                local highlight = Instance.new("Highlight")
+                highlight.FillTransparency = 0.5
+                highlight.OutlineTransparency = 0
+                highlight.Adornee = character
+                highlight.Parent = character
+                obj.Highlight = highlight
+            end
+
+            obj.Highlight.FillColor = GetESPColor(player, ESP.Settings.ChamsColor, isVisible)
+            obj.Highlight.OutlineColor = ESP.Settings.ChamsOutlineColor
+            obj.Highlight.OutlineTransparency = ESP.Settings.ChamsOutline and 0 or 1
+            obj.Highlight.Enabled = true
+        else
+            if obj.Highlight then
+                obj.Highlight.Enabled = false
+            end
+        end
+
+        -- ═══════════════════════ DISTANCE ESP ═══════════════════════
+        local bottomOffset = bounds.Y + bounds.Height + 2
+        if ESP.Settings.Distance then
+            local meters = math.floor(distance / 3.5714 + 0.5)
+            obj.Distance.Text = "[" .. meters .. "m]"
+            local distY = bottomOffset
+            -- Only show if distance text would be visible
+            if distY > -50 and distY < viewport.Y + 50 then
+                obj.Distance.Position = Vector2.new(bounds.X + bounds.Width / 2, distY)
+                obj.Distance.Color = GetESPColor(player, ESP.Settings.DistanceColor, isVisible)
+                obj.Distance.Font = GetFont(ESP.Settings.FlagsFont)
+                obj.Distance.Visible = true
+                bottomOffset = bottomOffset + 14
+            else
+                obj.Distance.Visible = false
+            end
+        else
+            obj.Distance.Visible = false
+        end
+
+        -- ═══════════════════════ TOOL ESP ═══════════════════════
+        if ESP.Settings.Tool then
+            local tool = character:FindFirstChildOfClass("Tool")
+            local toolName = tool and tool.Name or "None"
+            obj.Tool.Text = "[" .. toolName .. "]"
+            local toolY = bottomOffset
+            if toolY > -50 and toolY < viewport.Y + 50 then
+                obj.Tool.Position = Vector2.new(bounds.X + bounds.Width / 2, toolY)
+                obj.Tool.Color = GetESPColor(player, ESP.Settings.ToolColor, isVisible)
+                obj.Tool.Font = GetFont(ESP.Settings.FlagsFont)
+                obj.Tool.Visible = true
+            else
+                obj.Tool.Visible = false
+            end
+        else
+            obj.Tool.Visible = false
+        end
+    end
+end
+
+-- ════════════════════════ PUBLIC API ════════════════════════
+
+function ESP:Initialize()
+    for _, obj in pairs(self.Objects) do
+        DestroyESPObject(obj)
+    end
+    self.Objects = {}
+
+    Players.PlayerRemoving:Connect(function(player)
+        if self.Objects[player] then
+            DestroyESPObject(self.Objects[player])
+            self.Objects[player] = nil
+        end
+    end)
+end
+
+function ESP:Toggle(value)
+    if value == nil then
+        self.Settings.Enabled = not self.Settings.Enabled
+    else
+        self.Settings.Enabled = value
+    end
+    if not value then
+        for _, obj in pairs(self.Objects) do
+            HideESPObject(obj)
+        end
+    end
+end
+
+function ESP:SetSetting(key, value)
+    if self.Settings[key] ~= nil then
+        self.Settings[key] = value
+    end
+end
+function ESP:GetSetting(key)
+    return self.Settings[key]
+end
+function ESP:UpdateColor(settingKey, color)
+    if self.Settings[settingKey] ~= nil then
+        self.Settings[settingKey] = color
+    end
+end
+function ESP:Unload()
+    if self.Connection then
+        self.Connection:Disconnect()
+        self.Connection = nil
+    end
+
+    for player, obj in pairs(self.Objects) do
+        -- Explicitly destroy Highlights first
+        if obj.Highlight then
+            pcall(function() obj.Highlight:Destroy() end)
+            obj.Highlight = nil
+        end
+        DestroyESPObject(obj)
+    end
+    self.Objects = {}
+end
+-- ════════════════════════ LIBRARY INTEGRATION ════════════════════════
+
+function ESP:SyncFromFlags(flags)
+    -- Helper to get value from flag (handles both direct values and functions)
+    local function getFlagValue(flag)
+        if flag == nil then return nil end
+        if type(flag) == "function" then
+            return flag()
+        end
+        return flag
+    end
+
+    -- Helper to get color value (handles both direct colors and functions that return colors)
+    local function getColorValue(flag)
+        local val = getFlagValue(flag)
+        if val and type(val) == "table" and val.Color then
+            return val.Color
+        end
+        return val
+    end
+
+    -- Map library flags to ESP settings
+    self.Settings.Enabled = getFlagValue(flags["esp_enabled"]) or false
+    self.Settings.Box = getFlagValue(flags["esp_box"]) or false
+    self.Settings.BoxColor = getColorValue(flags["esp_box_color"]) or self.Settings.BoxColor
+    self.Settings.BoxType = getFlagValue(flags["esp_box_type"]) or "Dynamic"
+    self.Settings.Name = getFlagValue(flags["esp_name"]) or false
+    self.Settings.NameColor = getColorValue(flags["esp_name_color"]) or self.Settings.NameColor
+    self.Settings.NameType = getFlagValue(flags["esp_name_type"]) or "DisplayName"
+    self.Settings.HealthBar = getFlagValue(flags["esp_healthbar"]) or false
+    self.Settings.HealthValue = getFlagValue(flags["esp_healthvalue"]) or false
+    self.Settings.HealthColor = getColorValue(flags["esp_health_color"]) or self.Settings.HealthColor
+    self.Settings.HealthGradient = getFlagValue(flags["esp_health_gradient"]) or false
+    self.Settings.HealthGradientColor = getColorValue(flags["esp_health_gradient_color"]) or self.Settings.HealthGradientColor
+    self.Settings.Distance = getFlagValue(flags["esp_distance"]) or false
+    self.Settings.DistanceColor = getColorValue(flags["esp_distance_color"]) or self.Settings.DistanceColor
+    self.Settings.Skeleton = getFlagValue(flags["esp_skeleton"]) or false
+    self.Settings.SkeletonColor = getColorValue(flags["esp_skeleton_color"]) or self.Settings.SkeletonColor
+    self.Settings.Chams = getFlagValue(flags["esp_chams"]) or false
+    self.Settings.ChamsColor = getColorValue(flags["esp_chams_color"]) or self.Settings.ChamsColor
+    self.Settings.ChamsOutlineColor = getColorValue(flags["esp_chams_outline_color"]) or self.Settings.ChamsOutlineColor
+    self.Settings.ChamsOutline = getFlagValue(flags["esp_chams_outline"]) or false
+    self.Settings.Tool = getFlagValue(flags["esp_tool"]) or false
+    self.Settings.ToolColor = getColorValue(flags["esp_tool_color"]) or self.Settings.ToolColor
+    self.Settings.MaxDistance = getFlagValue(flags["esp_max_distance"]) or 1000
+    self.Settings.VisibleOnly = getFlagValue(flags["esp_visible_only"]) or false
+    self.Settings.VisibleCheck = getFlagValue(flags["esp_visible_check"]) or false
+    self.Settings.VisibleColor = getColorValue(flags["esp_visible_color"]) or self.Settings.VisibleColor
+    self.Settings.OccludedColor = getColorValue(flags["esp_occluded_color"]) or self.Settings.OccludedColor
+    self.Settings.TeamCheck = getFlagValue(flags["esp_teamcheck"])
+    if self.Settings.TeamCheck == nil then self.Settings.TeamCheck = true end
+    self.Settings.FriendlyOnly = getFlagValue(flags["esp_friendly_only"]) or false
+    self.Settings.EnemyOnly = getFlagValue(flags["esp_enemy_only"]) or false
+    self.Settings.PriorityOnly = getFlagValue(flags["esp_priority_only"]) or false
+    self.Settings.OffscreenArrows = getFlagValue(flags["esp_offscreen_arrows"]) or false
+    self.Settings.OffscreenArrowColor = getColorValue(flags["esp_offscreen_arrow_color"]) or self.Settings.OffscreenArrowColor
+    self.Settings.OffscreenArrowRadius = getFlagValue(flags["esp_offscreen_arrow_radius"]) or 250
+    self.Settings.OffscreenArrowSize = getFlagValue(flags["esp_offscreen_arrow_size"]) or 14
+end
+
+-- Auto-sync loop - call this once from main script
+function ESP:StartAutoSync(flags_table)
+    -- Resolve all function values before passing to SyncFromFlags
+    local function resolveFlags()
+        local resolved = {}
+        for k, v in pairs(flags_table) do
+            if type(v) == "function" then
+                local result = v()
+                -- Handle color objects that might be returned
+                if type(result) == "table" and result.Color then
+                    resolved[k] = result
+                else
+                    resolved[k] = result
+                end
+            else
+                resolved[k] = v
+            end
+        end
+        return resolved
+    end
+
+    task.spawn(function()
+        while self.Connection do
+            task.wait(0.05)
+            local resolvedFlags = resolveFlags()
+            self:SyncFromFlags(resolvedFlags)
+        end
+    end)
+end
+-- Start render loop
+ESP.Connection = RunService.RenderStepped:Connect(UpdateESP)
+
+return ESP
